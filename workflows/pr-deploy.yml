@@ -1,0 +1,91 @@
+name: PR (develop) — Lint/Check/Build
+
+on:
+  pull_request:
+    branches:
+      - develop
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    env:
+      NODE_ENV: dev
+      SKIP_SVELTE_KIT_TELEMETRY: '1'
+      CI: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Enable Corepack (pnpm/yarn)
+        run: corepack enable
+
+      - name: Use PNPM
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+          
+      - name: Install (pnpm)
+        if: ${{ hashFiles('pnpm-lock.yaml') != '' }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Install (npm)
+        if: ${{ hashFiles('package-lock.json') != '' && hashFiles('pnpm-lock.yaml') == '' }}
+        run: npm ci
+
+      - name: Install (yarn)
+        if: ${{ hashFiles('yarn.lock') != '' && hashFiles('pnpm-lock.yaml') == '' && hashFiles('package-lock.json') == '' }}
+        run: yarn install --frozen-lockfile
+
+      - name: Lint
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm run lint; \
+          elif [ -f package-lock.json ]; then ROLLUP_SKIP_NATIVE=true npm run lint; \
+          elif [ -f yarn.lock ]; then yarn run lint; \
+          else npm run lint || true; fi
+
+      - name: Type/Component Check (svelte-check)
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm run check; \
+          elif [ -f package-lock.json ]; then npm run check; \
+          elif [ -f yarn.lock ]; then yarn run check; \
+          else npm run check || true; fi
+
+      - name: Build (default)
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm run build; \
+          elif [ -f package-lock.json ]; then npm run build; \
+          elif [ -f yarn.lock ]; then yarn run build; \
+          else npm run build || true; fi
+
+      - name: Build (staging)
+        run: |
+          if [ -f pnpm-lock.yaml ]; then pnpm run build:stg; \
+          elif [ -f package-lock.json ]; then npm run build:stg; \
+          elif [ -f yarn.lock ]; then yarn run build:stg; \
+          else npm run build:stg || true; fi
+
+      - name: Build (production)
+        run: |
+          if npm run | grep -q "build:prod"; then
+            if [ -f pnpm-lock.yaml ]; then pnpm run build:prod; \
+            elif [ -f package-lock.json ]; then npm run build:prod; \
+            elif [ -f yarn.lock ]; then yarn run build:prod; \
+            else npm run build:prod || true; fi
+          else
+            echo "build:prod script not found — skipping";
+          fi
